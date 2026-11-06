@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShowParty</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-left">
+      <h1 class="site-title">ShowParty</h1>
+      <span id="current-video-name" class="video-filename">No video selected</span>
+    </div>
+
+    <div class="header-right">
+      <div class="connection-info" aria-live="polite">
+        <span id="connection-indicator" class="status-dot status-disconnected" aria-hidden="true"></span>
+        <span id="connection-status-text">Connecting...</span>
+        <span class="divider" aria-hidden="true">|</span>
+        <span id="viewer-count">0 connected</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <!-- Top toolbar: Video selector with per-video remove buttons and MP4 file upload -->
+    <section class="video-toolbar" aria-label="Video selection controls">
+      <div class="selector-group">
+        <span class="toolbar-label" id="video-selector-heading">Video file:</span>
+
+        <!-- Custom Video Selector Dropdown (supports per-item Remove buttons) -->
+        <div class="video-selector-dropdown" id="video-selector-dropdown">
+          <button
+            type="button"
+            id="video-selector-toggle"
+            class="video-selector-toggle"
+            aria-haspopup="listbox"
+            aria-expanded="false"
+            aria-labelledby="video-selector-heading video-selector-label"
+          >
+            <span id="video-selector-label" class="video-selector-label">-- Select an MP4 from /videos --</span>
+            <svg class="selector-chevron" viewBox="0 0 16 16" aria-hidden="true">
+              <polyline points="4,6 8,10 12,6" stroke="currentColor" stroke-width="1.5" fill="none"></polyline>
+            </svg>
+          </button>
+
+          <ul
+            id="video-selector-menu"
+            class="video-selector-menu"
+            role="listbox"
+            aria-label="Available MP4 videos"
+            hidden
+          ></ul>
+        </div>
+
+        <!-- Hidden native select kept synchronized for compatibility -->
+        <select id="video-select" class="visually-hidden" tabindex="-1" aria-hidden="true">
+          <option value="">-- Select an MP4 from /videos --</option>
+        </select>
+
+        <button type="button" id="refresh-videos-btn" class="secondary-btn" title="Refresh video list">
+          Refresh
+        </button>
+      </div>
+
+      <div class="upload-group">
+        <input type="file" id="file-input" accept="video/mp4,.mp4" hidden>
+        <button type="button" id="add-video-btn" class="secondary-btn">
+          Add MP4 File
+        </button>
+        <span id="upload-status" class="upload-status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <!-- Main Watch Area: Video Player + Real-Time Chat Side-by-Side on Desktop -->
+    <div class="watch-layout">
+      <!-- Video Player Container (also supports drag-and-drop MP4 files) -->
+      <section id="player-container" class="player-container" aria-label="Video player">
+        <div class="video-viewport" id="video-viewport">
+          <video
+            id="video-player"
+            class="video-element"
+            width="1280"
+            height="720"
+            preload="metadata"
+            playsinline
+          ></video>
+
+          <!-- Empty state / Drag-and-drop overlay when no video is loaded -->
+          <div id="player-overlay" class="player-overlay">
+            <p id="overlay-primary-text" class="overlay-title">No MP4 video loaded</p>
+            <p id="overlay-secondary-text" class="overlay-subtitle">
+              Place an .mp4 file in the <code>/videos</code> folder or drag and drop an .mp4 file here.
+            </p>
+          </div>
+
+          <!-- Autoplay muted banner when browser blocks unmuted autoplay on join -->
+          <div id="autoplay-banner" class="autoplay-banner" hidden>
+            <span>Audio was muted by your browser so playback could start in sync.</span>
+            <button type="button" id="unmute-banner-btn" class="banner-btn">Unmute Audio</button>
+          </div>
+        </div>
+
+        <!-- Custom Video Controls Bar -->
+        <div class="controls-bar" role="group" aria-label="Playback controls">
+          <!-- Seek Bar Row -->
+          <div class="seek-row">
+            <input
+              type="range"
+              id="seek-bar"
+              class="range-slider seek-slider"
+              min="0"
+              max="100"
+              step="0.1"
+              value="0"
+              aria-label="Seek timeline"
+              disabled
+            >
+          </div>
+
+          <!-- Buttons & Timestamps Row -->
+          <div class="controls-row">
+            <div class="controls-left">
+              <!-- Play / Pause Button -->
+              <button
+                type="button"
+                id="play-pause-btn"
+                class="control-btn"
+                aria-label="Play"
+                title="Play / Pause (Space)"
+                disabled
+              >
+                <!-- Play Icon -->
+                <svg id="icon-play" class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <polygon points="6,4 20,12 6,20" fill="currentColor"></polygon>
+                </svg>
+                <!-- Pause Icon -->
+                <svg id="icon-pause" class="control-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+                  <rect x="6" y="4" width="4" height="16" fill="currentColor"></rect>
+                  <rect x="14" y="4" width="4" height="16" fill="currentColor"></rect>
+                </svg>
+                <span id="play-pause-label" class="btn-text">Play</span>
+              </button>
+
+              <!-- Time Display -->
+              <div class="time-display" aria-label="Playback time">
+                <span id="current-time">00:00</span>
+                <span class="time-separator">/</span>
+                <span id="duration-time">00:00</span>
+              </div>
+            </div>
+
+            <div class="controls-right">
+              <!-- Mute / Unmute Button -->
+              <button
+                type="button"
+                id="mute-btn"
+                class="control-btn"
+                aria-label="Mute"
+                title="Mute / Unmute (M)"
+              >
+                <!-- Volume On Icon -->
+                <svg id="icon-volume-on" class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <polygon points="3,9 7,9 12,4 12,20 7,15 3,15" fill="currentColor"></polygon>
+                  <path d="M16,8 C17.5,9.5 17.5,14.5 16,16" stroke="currentColor" stroke-width="2" fill="none"></path>
+                  <path d="M19,5 C22,8 22,16 19,19" stroke="currentColor" stroke-width="2" fill="none"></path>
+                </svg>
+                <!-- Volume Muted Icon -->
+                <svg id="icon-volume-muted" class="control-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+                  <polygon points="3,9 7,9 12,4 12,20 7,15 3,15" fill="currentColor"></polygon>
+                  <line x1="16" y1="9" x2="22" y2="15" stroke="currentColor" stroke-width="2"></line>
+                  <line x1="22" y1="9" x2="16" y2="15" stroke="currentColor" stroke-width="2"></line>
+                </svg>
+              </button>
+
+              <!-- Volume Slider -->
+              <input
+                type="range"
+                id="volume-slider"
+                class="range-slider volume-slider"
+                min="0"
+                max="1"
+                step="0.01"
+                value="1"
+                aria-label="Volume"
+                title="Volume (Up/Down Arrows)"
+              >
+              <span id="volume-percent" class="volume-percent">100%</span>
+
+              <!-- Manual Resync Button -->
+              <button
+                type="button"
+                id="resync-btn"
+                class="control-btn text-only-btn"
+                title="Synchronize with server playback state"
+              >
+                Sync
+              </button>
+
+              <!-- Fullscreen Button -->
+              <button
+                type="button"
+                id="fullscreen-btn"
+                class="control-btn"
+                aria-label="Toggle Fullscreen"
+                title="Fullscreen (F)"
+              >
+                <svg id="icon-fullscreen-enter" class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <polyline points="4,9 4,4 9,4" stroke="currentColor" stroke-width="2" fill="none"></polyline>
+                  <polyline points="15,4 20,4 20,9" stroke="currentColor" stroke-width="2" fill="none"></polyline>
+                  <polyline points="20,15 20,20 15,20" stroke="currentColor" stroke-width="2" fill="none"></polyline>
+                  <polyline points="9,20 4,20 4,15" stroke="currentColor" stroke-width="2" fill="none"></polyline>
+                </svg>
+                <svg id="icon-fullscreen-exit" class="control-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+                  <polyline points="9,4 9,9 4,9" stroke="currentColor" stroke-width="2" fill="none"></polyline>
+                  <polyline points="15,9 20,9 20,4" stroke="currentColor" stroke-width="2" fill="none"></polyline>
+                  <polyline points="15,20 15,15 20,15" stroke="currentColor" stroke-width="2" fill="none"></polyline>
+                  <polyline points="4,15 9,15 9,20" stroke="currentColor" stroke-width="2" fill="none"></polyline>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Real-Time Chat Panel -->
+      <aside class="chat-panel" aria-label="Live chat">
+        <div class="chat-header">
+          <h2 class="chat-title">Chat</h2>
+          <span id="chat-username-badge" class="chat-username-badge" title="Type /name <username> in chat to change">
+            Connecting...
+          </span>
+        </div>
+
+        <div id="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
+          <div class="chat-message chat-system">
+            <span class="chat-text">Type <code>/name &lt;username&gt;</code> to change your display name.</span>
+          </div>
+        </div>
+
+        <form id="chat-form" class="chat-form">
+          <input
+            type="text"
+            id="chat-input"
+            class="chat-input"
+            placeholder="Message or /name newname"
+            maxlength="500"
+            aria-label="Chat message"
+          >
+          <button type="submit" id="chat-send-btn" class="secondary-btn chat-send-btn">
+            Send
+          </button>
+        </form>
+      </aside>
+    </div>
+
+    <!-- Footer Bar: Keyboard Shortcuts & Local Network Access Info -->
+    <footer class="info-bar">
+      <div class="shortcuts-summary">
+        <span class="info-title">Shortcuts:</span>
+        <span><kbd>Space</kbd> Play/Pause</span>
+        <span><kbd>Left</kbd>/<kbd>Right</kbd> Seek 5s</span>
+        <span><kbd>Up</kbd>/<kbd>Down</kbd> Volume 5%</span>
+        <span><kbd>M</kbd> Mute</span>
+        <span><kbd>F</kbd> Fullscreen</span>
+      </div>
+      <div class="network-summary">
+        <span class="info-title">Local Wi-Fi URL:</span>
+        <code id="network-url-display">Loading...</code>
+      </div>
+    </footer>
+  </main>
+
+  <!-- Confirmation Modal Dialog for Video Deletion -->
+  <dialog id="delete-confirm-dialog" class="confirm-dialog" aria-labelledby="delete-dialog-title">
+    <form method="dialog" class="confirm-dialog-form">
+      <h2 id="delete-dialog-title" class="confirm-dialog-title">Remove Video</h2>
+      <p id="delete-dialog-message" class="confirm-dialog-message"></p>
+      <div class="confirm-dialog-actions">
+        <button type="submit" value="cancel" id="delete-cancel-btn" class="secondary-btn">
+          Cancel
+        </button>
+        <button type="submit" value="confirm" id="delete-confirm-btn" class="danger-btn">
+          Remove Video
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/script.js"></script>
+</body>
+</html>
