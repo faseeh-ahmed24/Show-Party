@@ -1,0 +1,29 @@
+/**
+ * aurora.css
+ *
+ * Styles for the fixed WebGL2 Aurora background container and fallback.
+ * Positioned behind all ShowParty content with pointer-events disabled.
+ */
+
+.aurora-container {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background-color: #0d0b14;
+}
+
+.aurora-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Fallback background if WebGL2 is unavailable */
+.aurora-container.aurora-fallback {
+  background-color: #12101b;
+}

@@ -6,13 +6,16 @@
  *   2. Keyboard shortcuts (Space, Left/Right, Up/Down, M, F)
  *   3. Real-time synchronization via Socket.IO with drift correction and loop prevention
  *   4. Video selection from /videos, per-video removal with confirmation, and drag-and-drop MP4 hosting
- *   5. Real-time chat panel with server-authoritative usernames and /name command
+ *   5. Real-time chat panel with server-authoritative usernames, /name command,
+ *      sender upward wave animation, and fullscreen temporary chat overlay
+ *   6. WebGL2 Aurora background initialization
  */
 
 (function () {
   'use strict';
 
   // --- DOM Elements ---
+  const auroraContainer = document.getElementById('aurora-background');
   const playerContainer = document.getElementById('player-container');
   const videoPlayer = document.getElementById('video-player');
   const playerOverlay = document.getElementById('player-overlay');
@@ -20,6 +23,9 @@
   const overlaySecondaryText = document.getElementById('overlay-secondary-text');
   const autoplayBanner = document.getElementById('autoplay-banner');
   const unmuteBannerBtn = document.getElementById('unmute-banner-btn');
+  const fullscreenChatOverlay = document.getElementById('fullscreen-chat-overlay');
+  const fullscreenChatForm = document.getElementById('fullscreen-chat-form');
+  const fullscreenChatInput = document.getElementById('fullscreen-chat-input');
 
   const currentVideoNameEl = document.getElementById('current-video-name');
   const connectionIndicator = document.getElementById('connection-indicator');
@@ -55,6 +61,7 @@
   const iconVolumeMuted = document.getElementById('icon-volume-muted');
   const volumeSlider = document.getElementById('volume-slider');
   const volumePercentEl = document.getElementById('volume-percent');
+  const volumeDialOverlay = document.getElementById('volume-dial-overlay');
 
   const resyncBtn = document.getElementById('resync-btn');
   const fullscreenBtn = document.getElementById('fullscreen-btn');
@@ -62,16 +69,36 @@
   const iconFullscreenExit = document.getElementById('icon-fullscreen-exit');
 
   // Chat DOM elements
+  const chatPanel = document.getElementById('chat-panel');
+  const chatSendWave = document.getElementById('chat-send-wave');
   const chatUsernameBadge = document.getElementById('chat-username-badge');
   const chatMessagesEl = document.getElementById('chat-messages');
   const chatForm = document.getElementById('chat-form');
   const chatInput = document.getElementById('chat-input');
 
+  // Initialize WebGL2 Aurora Background
+  if (auroraContainer && typeof window.initAuroraBackground === 'function') {
+    window.initAuroraBackground(auroraContainer, {
+      colorStops: ['#EC4899', '#7C3AED', '#5227FF'],
+      amplitude: 1.0,
+      blend: 0.5,
+      height: 0.45,
+      speed: 1.0,
+      glow: 0.6,
+      layers: 1,
+      brightness: 1.0,
+      mouseInteraction: true,
+      intro: true,
+      opacity: 0.8
+    });
+  }
+
   // --- Synchronization Constants & State ---
-  // Tolerance for explicit actions (play, pause, seek, join) in seconds
   const ACTION_SYNC_TOLERANCE_SECONDS = 0.35;
-  // Tolerance for periodic background drift checks while playing in seconds
   const DRIFT_TOLERANCE_SECONDS = 1.5;
+  const MAX_FULLSCREEN_OVERLAY_MESSAGES = 5;
+  const FULLSCREEN_MESSAGE_VISIBLE_MS = 1000;
+  const FULLSCREEN_MESSAGE_FADEOUT_MS = 220;
 
   const socket = io({
     reconnection: true,
@@ -86,7 +113,82 @@
   let isDraggingSeekBar = false;      // True while the user is dragging the timeline slider
   let isApplyingServerState = false;  // Guard flag preventing programmatic actions from re-emitting
   let pendingDeleteVideoName = null;  // Filename awaiting user confirmation to delete
+  let volumeDialHideTimer = 0;        // Auto-fade timer for the floating CometDial volume overlay
+  let cometDialInstance = null;       // Vanilla JS CometDial instance
   const renderedMessageIds = new Set();
+  const activeFullscreenTimers = new Set();
+
+  /**
+   * Resets the 1-second fade-out timer for the floating CometDial volume overlay.
+   */
+  function scheduleVolumeDialFadeOut() {
+    if (volumeDialHideTimer) {
+      clearTimeout(volumeDialHideTimer);
+      volumeDialHideTimer = 0;
+    }
+    volumeDialHideTimer = setTimeout(() => {
+      volumeDialHideTimer = 0;
+      if (cometDialInstance && cometDialInstance.isDragging()) {
+        return;
+      }
+      if (volumeDialOverlay) {
+        volumeDialOverlay.classList.remove('dial-visible');
+      }
+    }, 1000);
+  }
+
+  /**
+   * Displays the floating CometDial volume control overlay and schedules it to fade
+   * out after 1 second of volume inactivity.
+   */
+  function showVolumeDialOverlay() {
+    if (!volumeDialOverlay) {
+      return;
+    }
+    volumeDialOverlay.classList.add('dial-visible');
+    scheduleVolumeDialFadeOut();
+  }
+
+  if (volumeDialOverlay && typeof window.createCometDial === 'function') {
+    cometDialInstance = window.createCometDial(volumeDialOverlay, {
+      defaultValue: 100,
+      min: 0,
+      max: 100,
+      step: 1,
+      unit: '%',
+      label: 'Volume',
+      accent: '#c4b5fd',
+      ink: '#fdfdfd',
+      size: 190,
+      sweep: 320,
+      thickness: 5,
+      speed: 25,
+      tapBounce: 0.2,
+      flickBounce: 0.1,
+      momentum: 1,
+      cometReach: 180,
+      cometWidth: 12,
+      onDragStart() {
+        if (volumeDialHideTimer) {
+          clearTimeout(volumeDialHideTimer);
+          volumeDialHideTimer = 0;
+        }
+        volumeDialOverlay.classList.add('dial-visible');
+      },
+      onChange(percentValue) {
+        const nextVol = Math.min(1, Math.max(0, Math.round(percentValue) / 100));
+        videoPlayer.muted = nextVol === 0;
+        videoPlayer.volume = nextVol;
+        updateVolumeUI({ syncDial: false });
+        if (!cometDialInstance || !cometDialInstance.isDragging()) {
+          scheduleVolumeDialFadeOut();
+        }
+      },
+      onDragEnd() {
+        scheduleVolumeDialFadeOut();
+      }
+    });
+  }
 
   // ==========================================================================
   // Formatting & UI Helpers
@@ -144,18 +246,26 @@
   }
 
   /**
-   * Updates the Mute button icon and Volume slider to match the local video volume.
+   * Updates the Mute button icon and CometDial reading to match the local video volume.
    * Note: Volume and Mute are intentionally independent per user.
    */
-  function updateVolumeUI() {
+  function updateVolumeUI({ syncDial = true } = {}) {
     const isMuted = videoPlayer.muted || videoPlayer.volume === 0;
     iconVolumeOn.hidden = isMuted;
     iconVolumeMuted.hidden = !isMuted;
     muteBtn.setAttribute('aria-label', isMuted ? 'Unmute' : 'Mute');
 
     const effectiveVolume = videoPlayer.muted ? 0 : videoPlayer.volume;
-    volumeSlider.value = String(effectiveVolume);
-    volumePercentEl.textContent = `${Math.round(effectiveVolume * 100)}%`;
+    const volumePercent = Math.round(effectiveVolume * 100);
+    if (volumeSlider) {
+      volumeSlider.value = String(effectiveVolume);
+    }
+    if (volumePercentEl) {
+      volumePercentEl.textContent = `${volumePercent}%`;
+    }
+    if (syncDial && cometDialInstance && !cometDialInstance.isDragging()) {
+      cometDialInstance.setValue(volumePercent, { animate: true });
+    }
 
     if (!videoPlayer.muted && videoPlayer.volume > 0) {
       autoplayBanner.hidden = true;
@@ -443,7 +553,6 @@
 
       const timeDifference = Math.abs((videoPlayer.currentTime || 0) - clampedTime);
 
-      // Only seek if the difference exceeds our tolerance threshold
       if (timeDifference > toleranceSeconds && !isDraggingSeekBar) {
         videoPlayer.currentTime = clampedTime;
         seekBar.value = String(clampedTime);
@@ -528,7 +637,6 @@
       playPauseBtn.disabled = false;
       seekBar.disabled = false;
 
-      // Single encodeURIComponent safely encodes spaces, parentheses, and consecutive periods
       videoPlayer.src = `/videos/${encodeURIComponent(loadedVideoFile)}`;
       videoPlayer.load();
       return;
@@ -549,9 +657,6 @@
   // User-Initiated Playback Actions (Client -> Server)
   // ==========================================================================
 
-  /**
-   * Triggered when the local user clicks Play/Pause, clicks the video canvas, or presses Space.
-   */
   function toggleUserPlayPause() {
     if (!loadedVideoFile || isApplyingServerState) {
       return;
@@ -575,9 +680,6 @@
     }
   }
 
-  /**
-   * Triggered when the local user finishes dragging the seek bar or uses Left/Right Arrow keys.
-   */
   function commitUserSeek(targetTimeSeconds) {
     if (!loadedVideoFile || isApplyingServerState) {
       return;
@@ -595,20 +697,15 @@
     socket.emit('seek', { currentTime: clampedTime });
   }
 
-  /**
-   * Changes local audio volume by a delta (e.g. +0.05 or -0.05).
-   */
   function adjustLocalVolume(delta) {
     const currentVolume = videoPlayer.muted ? 0 : videoPlayer.volume;
     const nextVolume = Math.min(1, Math.max(0, Math.round((currentVolume + delta) * 100) / 100));
     videoPlayer.muted = nextVolume === 0;
     videoPlayer.volume = nextVolume;
-    updateVolumeUI();
+    updateVolumeUI({ syncDial: true });
+    showVolumeDialOverlay();
   }
 
-  /**
-   * Toggles local audio mute state.
-   */
   function toggleLocalMute() {
     videoPlayer.muted = !videoPlayer.muted;
     if (!videoPlayer.muted && videoPlayer.volume === 0) {
@@ -618,10 +715,15 @@
   }
 
   /**
-   * Toggles fullscreen mode on the player container.
+   * Returns true if the player container is currently in Fullscreen mode.
    */
+  function isPlayerFullscreen() {
+    const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
+    return Boolean(fsElement && (fsElement === playerContainer || playerContainer.contains(fsElement)));
+  }
+
   function toggleFullscreen() {
-    if (!document.fullscreenElement) {
+    if (!isPlayerFullscreen()) {
       if (playerContainer.requestFullscreen) {
         playerContainer.requestFullscreen().catch(() => {});
       }
@@ -633,13 +735,313 @@
   }
 
   // ==========================================================================
-  // Real-Time Chat Logic
+  // Real-Time Chat, Sending Wave Animation & Fullscreen Chat Overlay
   // ==========================================================================
+
+  let activeWaveRafId = 0;
+
+  /**
+   * Stops any in-progress chat send wave animation and clears the canvas.
+   */
+  function stopChatSendWave() {
+    if (activeWaveRafId) {
+      cancelAnimationFrame(activeWaveRafId);
+      activeWaveRafId = 0;
+    }
+    if (!chatSendWave) {
+      return;
+    }
+    chatSendWave.classList.remove('wave-active');
+    if (typeof chatSendWave.getContext === 'function') {
+      const ctx = chatSendWave.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, chatSendWave.width || 0, chatSendWave.height || 0);
+      }
+    }
+  }
+
+  /**
+   * Triggers an upward-flowing, undulating halftone wave in the Aurora background
+   * palette (#EC4899 pink, #7C3AED violet, #5227FF deep purple) inside the chat
+   * panel ONLY for the user who sent the message. Restarts cleanly if already animating.
+   */
+  function triggerChatSendWave() {
+    if (!chatSendWave) {
+      return;
+    }
+
+    stopChatSendWave();
+    // Force reflow so rapid consecutive sends restart cleanly
+    void chatSendWave.offsetWidth;
+    chatSendWave.classList.add('wave-active');
+
+    const prefersReducedMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (prefersReducedMotion || typeof chatSendWave.getContext !== 'function') {
+      return;
+    }
+
+    const ctx = chatSendWave.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+
+    const width = Math.max(240, (chatPanel && chatPanel.clientWidth) || chatSendWave.clientWidth || 320);
+    const height = Math.max(300, (chatPanel && chatPanel.clientHeight) || chatSendWave.clientHeight || 480);
+    chatSendWave.width = width;
+    chatSendWave.height = height;
+
+    const durationMs = 880;
+    const startTime = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+    const dotSpacing = 6;
+
+    // Three harmonic wave crests matching the Aurora background stops:
+    // Top crest: Pink (#EC4899), Middle crest: Violet (#7C3AED), Bottom crest: Deep Purple (#5227FF)
+    const waveBands = [
+      { r: 236, g: 72, b: 153, yOffset: -24, amp1: 18, freq1: 0.026, amp2: 9, freq2: 0.058, speed: 6.2, spread: 28 },
+      { r: 124, g: 58, b: 237, yOffset: 2, amp1: 22, freq1: 0.022, amp2: 11, freq2: 0.049, speed: -5.4, spread: 34 },
+      { r: 82, g: 39, b: 255, yOffset: 28, amp1: 16, freq1: 0.030, amp2: 10, freq2: 0.064, speed: 4.8, spread: 30 }
+    ];
+
+    function renderWaveFrame(now) {
+      const currentNow = typeof now === 'number' ? now : Date.now();
+      const elapsed = currentNow - startTime;
+      const progress = Math.min(1, Math.max(0, elapsed / durationMs));
+
+      // Smooth cubic ease-out upward travel from below the input bar to above the header
+      const eased = 1 - Math.pow(1 - progress, 2.4);
+      const baseCenterY = height + 45 - eased * (height + 110);
+
+      // Envelope fades in smoothly over the first 15% and fades out over the final 28%
+      const fadeIn = Math.min(1, progress / 0.15);
+      const fadeOut = Math.min(1, (1 - progress) / 0.28);
+      const envelope = Math.max(0, fadeIn * fadeOut);
+
+      ctx.clearRect(0, 0, width, height);
+
+      if (envelope > 0.01) {
+        const phaseTime = elapsed * 0.0045;
+
+        // Precompute wave crest Y coordinates across columns for each of the 3 Aurora color bands
+        const cols = Math.ceil(width / dotSpacing) + 1;
+        const crestYs = waveBands.map((band, bandIdx) => {
+          const arr = new Float32Array(cols);
+          for (let col = 0; col < cols; col++) {
+            const x = col * dotSpacing;
+            const wave1 = Math.sin(x * band.freq1 + phaseTime * band.speed + bandIdx * 1.4) * band.amp1;
+            const wave2 = Math.cos(x * band.freq2 - phaseTime * (band.speed * 0.75) + bandIdx * 2.1) * band.amp2;
+            arr[col] = baseCenterY + band.yOffset + wave1 + wave2;
+          }
+          return arr;
+        });
+
+        // 1. Subtle undulating ribbon glow behind the halftone dots
+        for (let b = waveBands.length - 1; b >= 0; b--) {
+          const band = waveBands[b];
+          const cYs = crestYs[b];
+          ctx.beginPath();
+          for (let col = 0; col < cols; col++) {
+            const x = col * dotSpacing;
+            const y = cYs[col] - band.spread * 0.7;
+            if (col === 0) {
+              ctx.moveTo(x, y);
+            } else {
+              ctx.lineTo(x, y);
+            }
+          }
+          for (let col = cols - 1; col >= 0; col--) {
+            const x = col * dotSpacing;
+            const y = cYs[col] + band.spread * 0.9;
+            ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.fillStyle = `rgba(${band.r}, ${band.g}, ${band.b}, ${(0.14 * envelope).toFixed(3)})`;
+          ctx.fill();
+        }
+
+        // 2. Halftone dot-matrix wave field (inspired by the reference image)
+        const minRow = Math.max(0, Math.floor((baseCenterY - 105) / dotSpacing));
+        const maxRow = Math.min(Math.ceil(height / dotSpacing), Math.ceil((baseCenterY + 115) / dotSpacing));
+
+        for (let row = minRow; row <= maxRow; row++) {
+          const y = row * dotSpacing;
+          for (let col = 0; col < cols; col++) {
+            const x = col * dotSpacing;
+
+            // Find the strongest contributing wave crest at this (x, y) grid point
+            let totalWeight = 0;
+            let rAcc = 0;
+            let gAcc = 0;
+            let bAcc = 0;
+
+            for (let b = 0; b < waveBands.length; b++) {
+              const band = waveBands[b];
+              const dy = y - crestYs[b][col];
+              // Asymmetric vertical profile: sharper leading edge above, softer trailing wake below
+              const sigma = dy < 0 ? band.spread * 0.68 : band.spread * 1.15;
+              const normalizedDist = dy / sigma;
+              if (Math.abs(normalizedDist) < 2.2) {
+                const influence = Math.exp(-0.5 * normalizedDist * normalizedDist);
+                // Add subtle organic shimmer along the dot matrix
+                const shimmer = 0.82 + 0.18 * Math.sin(x * 0.09 + y * 0.07 - phaseTime * 8.0);
+                const weight = influence * shimmer;
+                totalWeight += weight;
+                rAcc += band.r * weight;
+                gAcc += band.g * weight;
+                bAcc += band.b * weight;
+              }
+            }
+
+            if (totalWeight > 0.08) {
+              const clampedIntensity = Math.min(1, totalWeight * 0.85);
+              const r = Math.min(255, Math.round(rAcc / totalWeight + clampedIntensity * 28));
+              const g = Math.min(255, Math.round(gAcc / totalWeight + clampedIntensity * 18));
+              const b = Math.min(255, Math.round(bAcc / totalWeight + clampedIntensity * 32));
+              const alpha = Math.min(0.95, clampedIntensity * envelope * 0.92);
+              const radius = 0.75 + clampedIntensity * 1.85;
+
+              ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
+              ctx.beginPath();
+              ctx.arc(x, y, radius, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+      }
+
+      if (progress < 1) {
+        activeWaveRafId = requestAnimationFrame(renderWaveFrame);
+      } else {
+        activeWaveRafId = 0;
+        stopChatSendWave();
+      }
+    }
+
+    activeWaveRafId = requestAnimationFrame(renderWaveFrame);
+  }
+
+  if (chatSendWave) {
+    chatSendWave.addEventListener('animationend', () => {
+      stopChatSendWave();
+    });
+  }
+
+  /**
+   * Opens and focuses the quick chat input bar inside the fullscreen video player.
+   */
+  function openFullscreenChatInput() {
+    if (!fullscreenChatForm || !fullscreenChatInput || !isPlayerFullscreen()) {
+      return;
+    }
+    fullscreenChatForm.hidden = false;
+    if (fullscreenChatOverlay) {
+      fullscreenChatOverlay.classList.add('chat-input-open');
+    }
+    if (typeof fullscreenChatInput.focus === 'function') {
+      fullscreenChatInput.focus();
+    }
+  }
+
+  /**
+   * Closes and resets the quick chat input bar inside the fullscreen video player.
+   */
+  function closeFullscreenChatInput() {
+    if (!fullscreenChatForm || !fullscreenChatInput) {
+      return;
+    }
+    fullscreenChatForm.hidden = true;
+    fullscreenChatInput.value = '';
+    if (fullscreenChatOverlay) {
+      fullscreenChatOverlay.classList.remove('chat-input-open');
+    }
+    if (typeof fullscreenChatInput.blur === 'function') {
+      fullscreenChatInput.blur();
+    }
+  }
+
+  /**
+   * Clears all temporary messages from the fullscreen chat overlay.
+   */
+  function clearFullscreenChatOverlay() {
+    for (const timerId of activeFullscreenTimers) {
+      clearTimeout(timerId);
+    }
+    activeFullscreenTimers.clear();
+    if (fullscreenChatOverlay) {
+      fullscreenChatOverlay.innerHTML = '';
+    }
+  }
+
+  /**
+   * Displays a temporary chat message in the bottom-left corner of the fullscreen
+   * video player, fading out after ~1 second and removing itself independently.
+   */
+  function showFullscreenChatMessage(message) {
+    if (!fullscreenChatOverlay || !isPlayerFullscreen() || !message || typeof message.text !== 'string') {
+      return;
+    }
+
+    fullscreenChatOverlay.hidden = false;
+
+    // Cap the maximum number of stacked messages so the overlay never grows too tall
+    while (fullscreenChatOverlay.children.length >= MAX_FULLSCREEN_OVERLAY_MESSAGES) {
+      const oldestChild = fullscreenChatOverlay.children[0];
+      if (oldestChild && typeof fullscreenChatOverlay.removeChild === 'function') {
+        fullscreenChatOverlay.removeChild(oldestChild);
+      } else {
+        fullscreenChatOverlay.children.shift();
+      }
+    }
+
+    const item = document.createElement('div');
+    item.className =
+      message.type === 'system'
+        ? 'fullscreen-chat-item fullscreen-chat-system'
+        : 'fullscreen-chat-item';
+
+    if (message.type !== 'system') {
+      const senderStrong = document.createElement('strong');
+      senderStrong.className = 'fullscreen-chat-sender';
+      senderStrong.textContent = `${message.sender || 'User'}:`;
+      item.appendChild(senderStrong);
+    }
+
+    const textSpan = document.createElement('span');
+    textSpan.className = 'fullscreen-chat-text';
+    textSpan.textContent = message.text;
+    item.appendChild(textSpan);
+
+    fullscreenChatOverlay.appendChild(item);
+
+    // Schedule smooth fade-out after ~1 second
+    const fadeTimer = setTimeout(() => {
+      activeFullscreenTimers.delete(fadeTimer);
+      item.classList.add('fading-out');
+
+      const removeTimer = setTimeout(() => {
+        activeFullscreenTimers.delete(removeTimer);
+        if (typeof fullscreenChatOverlay.removeChild === 'function' && item.parentNode === fullscreenChatOverlay) {
+          fullscreenChatOverlay.removeChild(item);
+        } else if (Array.isArray(fullscreenChatOverlay.children)) {
+          const idx = fullscreenChatOverlay.children.indexOf(item);
+          if (idx !== -1) {
+            fullscreenChatOverlay.children.splice(idx, 1);
+          }
+        }
+      }, FULLSCREEN_MESSAGE_FADEOUT_MS);
+
+      activeFullscreenTimers.add(removeTimer);
+    }, FULLSCREEN_MESSAGE_VISIBLE_MS);
+
+    activeFullscreenTimers.add(fadeTimer);
+  }
 
   /**
    * Appends a single chat message object to the chat log and auto-scrolls when appropriate.
    */
-  function appendChatMessage(message) {
+  function appendChatMessage(message, { isLive = false } = {}) {
     if (!chatMessagesEl || !message || typeof message.text !== 'string') {
       return;
     }
@@ -651,7 +1053,6 @@
       renderedMessageIds.add(message.id);
     }
 
-    // Check if the user is already scrolled near the bottom before adding the new message
     const distanceFromBottom =
       chatMessagesEl.scrollHeight - chatMessagesEl.scrollTop - chatMessagesEl.clientHeight;
     const shouldAutoScroll = distanceFromBottom <= 60 || message.senderId === socket.id;
@@ -681,6 +1082,11 @@
     if (shouldAutoScroll) {
       chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
     }
+
+    // If this is a newly arrived live message and the player is fullscreen, show temporary overlay
+    if (isLive && isPlayerFullscreen()) {
+      showFullscreenChatMessage(message);
+    }
   }
 
   if (chatForm && chatInput) {
@@ -694,6 +1100,29 @@
 
       socket.emit('chat-message', { text: rawText.trim() });
       chatInput.value = '';
+
+      // Trigger the upward Aurora wave only for the sender
+      triggerChatSendWave();
+    });
+  }
+
+  if (fullscreenChatForm && fullscreenChatInput) {
+    fullscreenChatForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const rawText = fullscreenChatInput.value;
+      if (typeof rawText === 'string' && rawText.trim() !== '') {
+        socket.emit('chat-message', { text: rawText.trim() });
+        triggerChatSendWave();
+      }
+      closeFullscreenChatInput();
+    });
+
+    fullscreenChatInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeFullscreenChatInput();
+      }
     });
   }
 
@@ -784,12 +1213,14 @@
     updateVolumeUI();
   });
 
-  volumeSlider.addEventListener('input', () => {
-    const newVolume = Number(volumeSlider.value);
-    videoPlayer.volume = newVolume;
-    videoPlayer.muted = newVolume === 0;
-    updateVolumeUI();
-  });
+  if (volumeSlider) {
+    volumeSlider.addEventListener('input', () => {
+      const newVolume = Number(volumeSlider.value);
+      videoPlayer.volume = newVolume;
+      videoPlayer.muted = newVolume === 0;
+      updateVolumeUI();
+    });
+  }
 
   resyncBtn.addEventListener('click', () => {
     socket.emit('request-sync');
@@ -800,9 +1231,19 @@
   });
 
   document.addEventListener('fullscreenchange', () => {
-    const isFullscreen = Boolean(document.fullscreenElement);
+    const isFullscreen = isPlayerFullscreen();
     iconFullscreenEnter.hidden = isFullscreen;
     iconFullscreenExit.hidden = !isFullscreen;
+
+    if (fullscreenChatOverlay) {
+      if (isFullscreen) {
+        fullscreenChatOverlay.hidden = false;
+      } else {
+        fullscreenChatOverlay.hidden = true;
+        clearFullscreenChatOverlay();
+        closeFullscreenChatInput();
+      }
+    }
   });
 
   // ==========================================================================
@@ -852,11 +1293,6 @@
     }
   });
 
-  /**
-   * Handles a dropped or selected MP4 file from the browser:
-   * - If the file already exists in /videos (matching name and byte size), selects it immediately.
-   * - Otherwise, streams it to the Node.js server's /videos folder so both users can watch it.
-   */
   async function handleProvidedVideoFile(file) {
     if (!file || !file.name.toLowerCase().endsWith('.mp4')) {
       uploadStatusEl.textContent = 'Only .mp4 video files are supported.';
@@ -904,7 +1340,6 @@
     }
   }
 
-  // Drag and drop listeners on the player container
   playerContainer.addEventListener('dragover', (event) => {
     event.preventDefault();
     playerContainer.classList.add('drag-over');
@@ -930,10 +1365,6 @@
   // Keyboard Shortcuts
   // ==========================================================================
 
-  /**
-   * Returns true if the user is currently typing in a text field (such as chat)
-   * or interacting with a select/dialog so video shortcuts do not interfere.
-   */
   function isTypingInInput(target) {
     if (deleteConfirmDialog && deleteConfirmDialog.open) {
       return true;
@@ -965,7 +1396,6 @@
       return;
     }
 
-    // Ignore shortcuts when modifier keys (Ctrl, Alt, Meta) are pressed
     if (event.ctrlKey || event.altKey || event.metaKey) {
       return;
     }
@@ -1011,6 +1441,14 @@
       case 'M': {
         event.preventDefault();
         toggleLocalMute();
+        break;
+      }
+      case 'x':
+      case 'X': {
+        if (isPlayerFullscreen()) {
+          event.preventDefault();
+          openFullscreenChatInput();
+        }
         break;
       }
       default:
@@ -1069,13 +1507,13 @@
   socket.on('chat-history', (payload = {}) => {
     if (Array.isArray(payload.messages)) {
       for (const msg of payload.messages) {
-        appendChatMessage(msg);
+        appendChatMessage(msg, { isLive: false });
       }
     }
   });
 
   socket.on('chat-message', (message) => {
-    appendChatMessage(message);
+    appendChatMessage(message, { isLive: true });
   });
 
   // Initial load of video list and network URLs

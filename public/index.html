@@ -4,9 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ShowParty</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Redaction+35&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/aurora.css">
+  <link rel="stylesheet" href="/cometDial.css">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <!-- Fixed WebGL2 Aurora Background (behind all content, pointer-events: none) -->
+  <div id="aurora-background" class="aurora-container" aria-hidden="true"></div>
+
   <header class="site-header">
     <div class="header-left">
       <h1 class="site-title">ShowParty</h1>
@@ -100,6 +108,41 @@
             <span>Audio was muted by your browser so playback could start in sync.</span>
             <button type="button" id="unmute-banner-btn" class="banner-btn">Unmute Audio</button>
           </div>
+
+          <!-- Floating CometDial Volume Control Overlay (shown on Up/Down arrows, fades out after 1s) -->
+          <div
+            id="volume-dial-overlay"
+            class="volume-dial-overlay"
+            aria-label="Volume control dial"
+          ></div>
+
+          <!-- Fullscreen Temporary Chat Overlay (inside fullscreen element, bottom-left) -->
+          <div
+            id="fullscreen-chat-overlay"
+            class="fullscreen-chat-overlay"
+            aria-live="polite"
+            hidden
+          ></div>
+
+          <!-- Fullscreen Quick Chat Input Bar (opened with X while in fullscreen) -->
+          <form
+            id="fullscreen-chat-form"
+            class="fullscreen-chat-form"
+            aria-label="Fullscreen chat input"
+            hidden
+          >
+            <input
+              type="text"
+              id="fullscreen-chat-input"
+              class="fullscreen-chat-input"
+              placeholder="Message or /name newname (Enter to send)"
+              maxlength="500"
+              aria-label="Fullscreen chat message"
+            >
+            <button type="submit" id="fullscreen-chat-send-btn" class="secondary-btn fullscreen-chat-send-btn">
+              Send
+            </button>
+          </form>
         </div>
 
         <!-- Custom Video Controls Bar -->
@@ -174,20 +217,6 @@
                 </svg>
               </button>
 
-              <!-- Volume Slider -->
-              <input
-                type="range"
-                id="volume-slider"
-                class="range-slider volume-slider"
-                min="0"
-                max="1"
-                step="0.01"
-                value="1"
-                aria-label="Volume"
-                title="Volume (Up/Down Arrows)"
-              >
-              <span id="volume-percent" class="volume-percent">100%</span>
-
               <!-- Manual Resync Button -->
               <button
                 type="button"
@@ -225,7 +254,10 @@
       </section>
 
       <!-- Real-Time Chat Panel -->
-      <aside class="chat-panel" aria-label="Live chat">
+      <aside class="chat-panel" id="chat-panel" aria-label="Live chat">
+        <!-- Undulating Aurora-colored wave canvas triggered when the current user sends a message -->
+        <canvas id="chat-send-wave" class="chat-send-wave" aria-hidden="true"></canvas>
+
         <div class="chat-header">
           <h2 class="chat-title">Chat</h2>
           <span id="chat-username-badge" class="chat-username-badge" title="Type /name <username> in chat to change">
@@ -264,6 +296,7 @@
         <span><kbd>Up</kbd>/<kbd>Down</kbd> Volume 5%</span>
         <span><kbd>M</kbd> Mute</span>
         <span><kbd>F</kbd> Fullscreen</span>
+        <span><kbd>X</kbd> Fullscreen Chat</span>
       </div>
       <div class="network-summary">
         <span class="info-title">Local Wi-Fi URL:</span>
@@ -289,6 +322,8 @@
   </dialog>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/aurora.js"></script>
+  <script src="/cometDial.js"></script>
   <script src="/script.js"></script>
 </body>
 </html>

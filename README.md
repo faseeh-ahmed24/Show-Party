@@ -126,3 +126,4 @@ Keyboard shortcuts work whenever the page has focus and you are not typing in th
 | `Down Arrow` | Decrease volume by 5% | Local to each user |
 | `M` | Mute / Unmute audio | Local to each user |
 | `F` | Toggle fullscreen | Local to each user |
+| `X` | Open quick chat input while in fullscreen (`Enter` to send, `Esc` to close) | Sends to all users |
