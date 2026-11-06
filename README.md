@@ -64,7 +64,7 @@ Show-Party/
 - Send messages using the **Enter** key or **Send** button.
 - Change your display name at any time using the slash command:
   ```text
-  /name faseeh
+  /name FireyDragon222
   ```
 - Usernames are validated on the server (1–20 characters, trimmed, control characters stripped, duplicates automatically disambiguated).
 
@@ -126,3 +126,4 @@ Keyboard shortcuts work whenever the page has focus and you are not typing in th
 | `Down Arrow` | Decrease volume by 5% | Local to each user |
 | `M` | Mute / Unmute audio | Local to each user |
 | `F` | Toggle fullscreen | Local to each user |
+| `Enter` | Send Chat | Local to each user |
