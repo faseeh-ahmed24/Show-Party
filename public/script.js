@@ -48,6 +48,7 @@
   const roomCodeDialog = document.getElementById('room-code-dialog');
   const customRoomCodeInput = document.getElementById('custom-room-code-input');
 
+  const videoToolbar = document.getElementById('video-toolbar');
   const videoSelectorDropdown = document.getElementById('video-selector-dropdown');
   const videoSelectorToggle = document.getElementById('video-selector-toggle');
   const videoSelectorLabel = document.getElementById('video-selector-label');
@@ -76,6 +77,7 @@
   const iconVolumeMuted = document.getElementById('icon-volume-muted');
   const volumeSlider = document.getElementById('volume-slider');
   const volumePercentEl = document.getElementById('volume-percent');
+  const volumeControlAnchor = document.getElementById('volume-control-anchor');
   const volumeDialOverlay = document.getElementById('volume-dial-overlay');
 
   const resyncBtn = document.getElementById('resync-btn');
@@ -136,35 +138,68 @@
   const renderedMessageIds = new Set();
   const activeFullscreenTimers = new Set();
 
+  let isHoveringVolumeControl = false;
+
   /**
-   * Resets the 1-second fade-out timer for the floating CometDial volume overlay.
+   * Resets the fade-out timer for the floating CometDial volume overlay.
    */
-  function scheduleVolumeDialFadeOut() {
+  function scheduleVolumeDialFadeOut(delayMs = 1000) {
     if (volumeDialHideTimer) {
       clearTimeout(volumeDialHideTimer);
       volumeDialHideTimer = 0;
     }
     volumeDialHideTimer = setTimeout(() => {
       volumeDialHideTimer = 0;
-      if (cometDialInstance && cometDialInstance.isDragging()) {
+      if (isHoveringVolumeControl || (cometDialInstance && cometDialInstance.isDragging())) {
         return;
       }
       if (volumeDialOverlay) {
         volumeDialOverlay.classList.remove('dial-visible');
       }
-    }, 1000);
+    }, delayMs);
   }
 
   /**
-   * Displays the floating CometDial volume control overlay and schedules it to fade
-   * out after 1 second of volume inactivity.
+   * Displays the floating CometDial volume control overlay above the mute button
+   * and schedules it to fade out after 1 second of volume inactivity (unless hovered).
    */
   function showVolumeDialOverlay() {
     if (!volumeDialOverlay) {
       return;
     }
     volumeDialOverlay.classList.add('dial-visible');
-    scheduleVolumeDialFadeOut();
+    if (!isHoveringVolumeControl) {
+      scheduleVolumeDialFadeOut(1000);
+    }
+  }
+
+  function handleVolumeHoverEnter() {
+    isHoveringVolumeControl = true;
+    if (volumeDialHideTimer) {
+      clearTimeout(volumeDialHideTimer);
+      volumeDialHideTimer = 0;
+    }
+    if (volumeDialOverlay) {
+      volumeDialOverlay.classList.add('dial-visible');
+    }
+  }
+
+  function handleVolumeHoverLeave() {
+    isHoveringVolumeControl = false;
+    scheduleVolumeDialFadeOut(350);
+  }
+
+  if (volumeControlAnchor) {
+    volumeControlAnchor.addEventListener('mouseenter', handleVolumeHoverEnter);
+    volumeControlAnchor.addEventListener('mouseleave', handleVolumeHoverLeave);
+  }
+  if (muteBtn) {
+    muteBtn.addEventListener('mouseenter', handleVolumeHoverEnter);
+    muteBtn.addEventListener('mouseleave', handleVolumeHoverLeave);
+  }
+  if (volumeDialOverlay) {
+    volumeDialOverlay.addEventListener('mouseenter', handleVolumeHoverEnter);
+    volumeDialOverlay.addEventListener('mouseleave', handleVolumeHoverLeave);
   }
 
   if (volumeDialOverlay && typeof window.createCometDial === 'function') {
@@ -177,15 +212,15 @@
       label: 'Volume',
       accent: '#c4b5fd',
       ink: '#fdfdfd',
-      size: 190,
+      size: 100,
       sweep: 320,
-      thickness: 5,
+      thickness: 8,
       speed: 25,
       tapBounce: 0.2,
       flickBounce: 0.1,
       momentum: 1,
       cometReach: 180,
-      cometWidth: 12,
+      cometWidth: 15,
       onDragStart() {
         if (volumeDialHideTimer) {
           clearTimeout(volumeDialHideTimer);
@@ -198,12 +233,14 @@
         videoPlayer.muted = nextVol === 0;
         videoPlayer.volume = nextVol;
         updateVolumeUI({ syncDial: false });
-        if (!cometDialInstance || !cometDialInstance.isDragging()) {
-          scheduleVolumeDialFadeOut();
+        if (!isHoveringVolumeControl && (!cometDialInstance || !cometDialInstance.isDragging())) {
+          scheduleVolumeDialFadeOut(1000);
         }
       },
       onDragEnd() {
-        scheduleVolumeDialFadeOut();
+        if (!isHoveringVolumeControl) {
+          scheduleVolumeDialFadeOut(1000);
+        }
       }
     });
   }
@@ -478,6 +515,10 @@
     if (roleBadgeEl) {
       roleBadgeEl.hidden = false;
       roleBadgeEl.textContent = isHost ? 'Host' : 'Guest';
+    }
+
+    if (videoToolbar) {
+      videoToolbar.hidden = !isHost;
     }
 
     if (hostRoomControls) {
@@ -1741,8 +1782,8 @@
         toggleLocalMute();
         break;
       }
-      case 'x':
-      case 'X': {
+      case 't':
+      case 'T': {
         if (isPlayerFullscreen()) {
           event.preventDefault();
           openFullscreenChatInput();

@@ -2,7 +2,7 @@
  * style.css
  *
  * Semi-minimalistic translucent dark styling for ShowParty, layered over the
- * WebGL2 Aurora background with Redaction 35 typography, undulating Aurora-colored
+ * WebGL2 Aurora background with Plus Jakarta Sans typography, undulating Aurora-colored
  * chat sending wave, and fullscreen chat overlay.
  */
 
@@ -42,7 +42,7 @@ body {
   min-height: 100%;
   background-color: var(--bg-page);
   color: var(--text-primary);
-  font-family: "Redaction 35", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 15px;
   line-height: 1.5;
   accent-color: var(--accent-color);
@@ -179,6 +179,10 @@ code {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: 4px;
+}
+
+.video-toolbar[hidden] {
+  display: none;
 }
 
 .selector-group,
@@ -403,7 +407,7 @@ code {
   background-color: rgba(8, 6, 16, 0.42);
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  overflow: hidden;
+  overflow: visible;
   min-width: 0;
 }
 
@@ -424,6 +428,8 @@ code {
   width: 100%;
   aspect-ratio: 16 / 9;
   background-color: rgba(0, 0, 0, 0.35);
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;

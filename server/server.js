@@ -754,6 +754,15 @@ io.on('connection', (socket) => {
       reason: 'play',
       actorId: socket.id
     });
+
+    const user = connectedUsers.get(socket.id);
+    if (user && updatedState.videoFile) {
+      const sysMsg = createChatMessage({
+        type: 'system',
+        text: `${user.username} unpaused`
+      });
+      io.emit('chat-message', sysMsg);
+    }
   });
 
   socket.on('pause', (payload = {}) => {
@@ -763,15 +772,35 @@ io.on('connection', (socket) => {
       reason: 'pause',
       actorId: socket.id
     });
+
+    const user = connectedUsers.get(socket.id);
+    if (user && updatedState.videoFile) {
+      const sysMsg = createChatMessage({
+        type: 'system',
+        text: `${user.username} paused`
+      });
+      io.emit('chat-message', sysMsg);
+    }
   });
 
   socket.on('seek', (payload = {}) => {
+    const previousState = playbackManager.getCurrentState();
     const updatedState = playbackManager.seek(payload.currentTime);
     io.emit('sync-state', {
       ...updatedState,
       reason: 'seek',
       actorId: socket.id
     });
+
+    const user = connectedUsers.get(socket.id);
+    if (user && updatedState.videoFile) {
+      const direction = updatedState.currentTime >= previousState.currentTime ? 'ahead' : 'back';
+      const sysMsg = createChatMessage({
+        type: 'system',
+        text: `${user.username} seeked ${direction}`
+      });
+      io.emit('chat-message', sysMsg);
+    }
   });
 
   // --- Video Library Selection (Host-Only) ---

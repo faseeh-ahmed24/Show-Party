@@ -6,7 +6,7 @@
   <title>ShowParty</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Redaction+35&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400..700;1,400..600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/aurora.css">
   <link rel="stylesheet" href="/cometDial.css">
   <link rel="stylesheet" href="/style.css">
@@ -59,8 +59,8 @@
   </div>
 
   <main class="main-content">
-    <!-- Top toolbar: Video selector with per-video remove buttons and MP4 file upload -->
-    <section class="video-toolbar" aria-label="Video selection controls">
+    <!-- Top toolbar: Video selector with per-video remove buttons and MP4 file upload (Host-only) -->
+    <section id="video-toolbar" class="video-toolbar" aria-label="Video selection controls">
       <div class="selector-group">
         <span class="toolbar-label" id="video-selector-heading">Video file:</span>
 
@@ -151,13 +151,6 @@
             <button type="button" id="unmute-banner-btn" class="banner-btn">Unmute Audio</button>
           </div>
 
-          <!-- Floating CometDial Volume Control Overlay (shown on Up/Down arrows, fades out after 1s) -->
-          <div
-            id="volume-dial-overlay"
-            class="volume-dial-overlay"
-            aria-label="Volume control dial"
-          ></div>
-
           <!-- Fullscreen Temporary Chat Overlay (inside fullscreen element, bottom-left) -->
           <div
             id="fullscreen-chat-overlay"
@@ -237,27 +230,35 @@
             </div>
 
             <div class="controls-right">
-              <!-- Mute / Unmute Button -->
-              <button
-                type="button"
-                id="mute-btn"
-                class="control-btn"
-                aria-label="Mute"
-                title="Mute / Unmute (M)"
-              >
-                <!-- Volume On Icon -->
-                <svg id="icon-volume-on" class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <polygon points="3,9 7,9 12,4 12,20 7,15 3,15" fill="currentColor"></polygon>
-                  <path d="M16,8 C17.5,9.5 17.5,14.5 16,16" stroke="currentColor" stroke-width="2" fill="none"></path>
-                  <path d="M19,5 C22,8 22,16 19,19" stroke="currentColor" stroke-width="2" fill="none"></path>
-                </svg>
-                <!-- Volume Muted Icon -->
-                <svg id="icon-volume-muted" class="control-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
-                  <polygon points="3,9 7,9 12,4 12,20 7,15 3,15" fill="currentColor"></polygon>
-                  <line x1="16" y1="9" x2="22" y2="15" stroke="currentColor" stroke-width="2"></line>
-                  <line x1="22" y1="9" x2="16" y2="15" stroke="currentColor" stroke-width="2"></line>
-                </svg>
-              </button>
+              <!-- Mute / Unmute Button + Linked Floating CometDial Volume Control -->
+              <div class="volume-control-anchor" id="volume-control-anchor">
+                <div
+                  id="volume-dial-overlay"
+                  class="volume-dial-overlay"
+                  aria-label="Volume control dial"
+                ></div>
+
+                <button
+                  type="button"
+                  id="mute-btn"
+                  class="control-btn"
+                  aria-label="Mute"
+                  title="Mute / Unmute (M) — Hover to adjust volume"
+                >
+                  <!-- Volume On Icon -->
+                  <svg id="icon-volume-on" class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <polygon points="3,9 7,9 12,4 12,20 7,15 3,15" fill="currentColor"></polygon>
+                    <path d="M16,8 C17.5,9.5 17.5,14.5 16,16" stroke="currentColor" stroke-width="2" fill="none"></path>
+                    <path d="M19,5 C22,8 22,16 19,19" stroke="currentColor" stroke-width="2" fill="none"></path>
+                  </svg>
+                  <!-- Volume Muted Icon -->
+                  <svg id="icon-volume-muted" class="control-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+                    <polygon points="3,9 7,9 12,4 12,20 7,15 3,15" fill="currentColor"></polygon>
+                    <line x1="16" y1="9" x2="22" y2="15" stroke="currentColor" stroke-width="2"></line>
+                    <line x1="22" y1="9" x2="16" y2="15" stroke="currentColor" stroke-width="2"></line>
+                  </svg>
+                </button>
+              </div>
 
               <!-- Manual Resync Button -->
               <button
@@ -338,7 +339,7 @@
         <span><kbd>Up</kbd>/<kbd>Down</kbd> Volume 5%</span>
         <span><kbd>M</kbd> Mute</span>
         <span><kbd>F</kbd> Fullscreen</span>
-        <span><kbd>X</kbd> Fullscreen Chat</span>
+        <span><kbd>T</kbd> Fullscreen Chat</span>
       </div>
       <div class="network-summary">
         <span class="info-title">Local Wi-Fi URL:</span>

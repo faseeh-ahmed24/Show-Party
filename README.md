@@ -131,7 +131,7 @@ ShowParty protects your room with a private **Room Access Code** so strangers wh
    - Send your friend the `https://*.trycloudflare.com` URL and your **Room Access Code**.
    - When your friend opens the URL, they will see the **Private Watch Party** access screen.
    - Once they enter the Room Access Code, they receive an encrypted `HttpOnly` session cookie and enter the watch party as a **Guest**.
-   - **Both Host and Guest** can play, pause, seek, resync, adjust their own local volume (`Up`/`Down` arrows for the CometDial overlay), toggle fullscreen (`F`), use fullscreen quick chat (`X`), send chat messages, and change their display name with `/name <username>`.
+   - **Both Host and Guest** can play, pause, seek, resync, adjust their own local volume (`Up`/`Down` arrows for the CometDial overlay), toggle fullscreen (`F`), use fullscreen quick chat (`T`), send chat messages, and change their display name with `/name <username>`.
 
 ### 6. How to Stop the Server and Tunnel Cleanly
 
@@ -191,4 +191,4 @@ Keyboard shortcuts work whenever the page has focus and you are not typing in an
 | `M` | Mute / Unmute audio | Local to each user |
 | `F` | Toggle fullscreen | Local to each user |
 | `Enter` | Send Chat | Local to each user |
-| `X` | Open quick chat input while in fullscreen (`Enter` to send, `Esc` to close) | Sends to all users |
+| `T` | Open quick chat input while in fullscreen (`Enter` to send, `Esc` to close) | Sends to all users |

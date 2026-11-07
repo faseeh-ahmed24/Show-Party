@@ -193,7 +193,7 @@
     root.style.setProperty('--cd-accent', accent);
     root.style.setProperty('--cd-ink', ink);
     root.style.setProperty('--cd-size', `${size}px`);
-    root.style.setProperty('--cd-figure', `${Math.round(size * 0.16)}px`);
+    root.style.setProperty('--cd-figure', `${Math.round(size * (size <= 80 ? 0.21 : 0.16))}px`);
     if (disabled) {
       root.setAttribute('data-disabled', '');
     }

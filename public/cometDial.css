@@ -69,7 +69,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 1px;
   pointer-events: none;
 }
 
@@ -90,11 +90,12 @@
 }
 
 .comet-dial__caption {
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: calc(var(--cd-size) * 0.09);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--cd-ink);
   opacity: 0.55;
+  line-height: 1;
 }
 
 .comet-dial[data-disabled] {
@@ -106,26 +107,46 @@
   pointer-events: none;
 }
 
-/* Floating Volume Dial Overlay inside .video-viewport (lower-center) */
+/* Anchor wrapper around #mute-btn so the volume dial is directly linked above it */
+.volume-control-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Floating Volume Dial Overlay anchored directly above #mute-btn */
 .volume-dial-overlay {
   position: absolute;
-  bottom: 24px;
+  bottom: calc(100% + 8px);
   left: 50%;
   translate: -50% 0;
-  z-index: 28;
+  z-index: 35;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 14px;
+  padding: 5px;
   border-radius: 50%;
-  background-color: rgba(14, 12, 24, 0.66);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background-color: rgba(14, 12, 24, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 220ms ease-out;
+  transition: opacity 200ms ease-out;
   @media (prefers-reduced-motion: reduce) {
     transition-duration: 40ms;
   }
+}
+
+/* Invisible hover bridge between #mute-btn and .volume-dial-overlay so moving the
+   cursor straight up from the mute button into the dial never drops hover state */
+.volume-dial-overlay::after {
+  content: '';
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 100%;
+  height: 12px;
 }
 
 .volume-dial-overlay.dial-visible {
