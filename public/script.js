@@ -28,10 +28,25 @@
   const fullscreenChatInput = document.getElementById('fullscreen-chat-input');
 
   const currentVideoNameEl = document.getElementById('current-video-name');
+  const roleBadgeEl = document.getElementById('role-badge');
   const connectionIndicator = document.getElementById('connection-indicator');
   const connectionStatusText = document.getElementById('connection-status-text');
   const viewerCountEl = document.getElementById('viewer-count');
   const networkUrlDisplay = document.getElementById('network-url-display');
+
+  const authGateOverlay = document.getElementById('auth-gate-overlay');
+  const authGateForm = document.getElementById('auth-gate-form');
+  const authCodeInput = document.getElementById('auth-code-input');
+  const authSubmitBtn = document.getElementById('auth-submit-btn');
+  const authErrorMsg = document.getElementById('auth-error-msg');
+
+  const hostRoomControls = document.getElementById('host-room-controls');
+  const hostRoomCodeDisplay = document.getElementById('host-room-code-display');
+  const toggleRoomCodeBtn = document.getElementById('toggle-room-code-btn');
+  const copyRoomCodeBtn = document.getElementById('copy-room-code-btn');
+  const changeRoomCodeBtn = document.getElementById('change-room-code-btn');
+  const roomCodeDialog = document.getElementById('room-code-dialog');
+  const customRoomCodeInput = document.getElementById('custom-room-code-input');
 
   const videoSelectorDropdown = document.getElementById('video-selector-dropdown');
   const videoSelectorToggle = document.getElementById('video-selector-toggle');
@@ -115,6 +130,9 @@
   let pendingDeleteVideoName = null;  // Filename awaiting user confirmation to delete
   let volumeDialHideTimer = 0;        // Auto-fade timer for the floating CometDial volume overlay
   let cometDialInstance = null;       // Vanilla JS CometDial instance
+  let currentUserRole = 'host';       // 'host' (local host computer) or 'guest' (visitor via tunnel/LAN)
+  let hostRoomCodeValue = '';         // Active room access code fetched for host-only display
+  let isRoomCodeRevealed = false;     // Whether the host's room code badge is currently unmasked
   const renderedMessageIds = new Set();
   const activeFullscreenTimers = new Set();
 
@@ -377,26 +395,32 @@
 
           selectBtn.addEventListener('click', () => {
             closeVideoSelectorMenu();
-            socket.emit('select-video', { videoFile: video.name });
-          });
-
-          // Small, unobtrusive Remove button on the far right
-          const removeBtn = document.createElement('button');
-          removeBtn.type = 'button';
-          removeBtn.className = 'video-item-remove-btn';
-          removeBtn.textContent = 'Remove';
-          removeBtn.title = `Remove ${video.name} from /videos`;
-          removeBtn.setAttribute('aria-label', `Remove ${video.name}`);
-          removeBtn.setAttribute('data-remove-video', video.name);
-
-          removeBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            closeVideoSelectorMenu();
-            requestVideoDeletion(video.name);
+            if (currentUserRole === 'host') {
+              socket.emit('select-video', { videoFile: video.name });
+            }
           });
 
           li.appendChild(selectBtn);
-          li.appendChild(removeBtn);
+
+          // Small, unobtrusive Remove button on the far right (Host-only)
+          if (currentUserRole === 'host') {
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'video-item-remove-btn';
+            removeBtn.textContent = 'Remove';
+            removeBtn.title = `Remove ${video.name} from /videos`;
+            removeBtn.setAttribute('aria-label', `Remove ${video.name}`);
+            removeBtn.setAttribute('data-remove-video', video.name);
+
+            removeBtn.addEventListener('click', (event) => {
+              event.stopPropagation();
+              closeVideoSelectorMenu();
+              requestVideoDeletion(video.name);
+            });
+
+            li.appendChild(removeBtn);
+          }
+
           videoSelectorMenu.appendChild(li);
         }
       }
@@ -406,15 +430,151 @@
   }
 
   /**
+   * Updates the host room code badge display (masked by default so it isn't leaked on screen share).
+   */
+  function updateHostRoomCodeBadge() {
+    if (!hostRoomCodeDisplay) {
+      return;
+    }
+    if (!hostRoomCodeValue) {
+      hostRoomCodeDisplay.textContent = '••••••••';
+      return;
+    }
+    hostRoomCodeDisplay.textContent = isRoomCodeRevealed ? hostRoomCodeValue : '••••••••';
+    if (toggleRoomCodeBtn) {
+      toggleRoomCodeBtn.textContent = isRoomCodeRevealed ? 'Hide' : 'Show';
+    }
+  }
+
+  /**
+   * Fetches the active room access code from GET /api/host/room-code (Host-only).
+   */
+  async function fetchHostRoomCode() {
+    if (currentUserRole !== 'host' || !hostRoomControls) {
+      return;
+    }
+    try {
+      const response = await fetch('/api/host/room-code');
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      if (data && typeof data.roomCode === 'string') {
+        hostRoomCodeValue = data.roomCode;
+        updateHostRoomCodeBadge();
+      }
+    } catch {
+      // Ignore in offline/test environments
+    }
+  }
+
+  /**
+   * Applies UI visibility and permissions based on whether the user is 'host' or 'guest'.
+   */
+  function applyUserRoleUI(role) {
+    currentUserRole = role === 'guest' ? 'guest' : 'host';
+    const isHost = currentUserRole === 'host';
+
+    if (roleBadgeEl) {
+      roleBadgeEl.hidden = false;
+      roleBadgeEl.textContent = isHost ? 'Host' : 'Guest';
+    }
+
+    if (hostRoomControls) {
+      hostRoomControls.hidden = !isHost;
+    }
+
+    if (addVideoBtn) {
+      addVideoBtn.hidden = !isHost;
+    }
+
+    if (refreshVideosBtn) {
+      refreshVideosBtn.hidden = !isHost;
+    }
+
+    if (videoSelectorToggle) {
+      videoSelectorToggle.disabled = !isHost;
+      videoSelectorToggle.title = isHost
+        ? 'Select an MP4 video from /videos'
+        : 'Only the host can change the active video';
+    }
+
+    if (!isHost) {
+      closeVideoSelectorMenu();
+    } else {
+      fetchHostRoomCode();
+    }
+
+    renderVideoDropdown(availableVideos);
+  }
+
+  /**
+   * Displays the Room Access Code authentication gate overlay for unauthenticated visitors.
+   */
+  function showAuthGate(errorMessage = '') {
+    if (!authGateOverlay) {
+      return;
+    }
+    authGateOverlay.hidden = false;
+
+    // Stop any video playback while unauthenticated
+    videoPlayer.pause();
+    videoPlayer.removeAttribute('src');
+    videoPlayer.load();
+
+    connectionIndicator.classList.remove('status-connected');
+    connectionIndicator.classList.add('status-disconnected');
+    connectionStatusText.textContent = 'Room Code Required';
+
+    if (authErrorMsg) {
+      if (errorMessage) {
+        authErrorMsg.textContent = errorMessage;
+        authErrorMsg.hidden = false;
+      } else {
+        authErrorMsg.textContent = '';
+        authErrorMsg.hidden = true;
+      }
+    }
+
+    if (authCodeInput && typeof authCodeInput.focus === 'function') {
+      authCodeInput.focus();
+    }
+  }
+
+  /**
+   * Hides the Room Access Code authentication gate overlay after successful authentication.
+   */
+  function hideAuthGate() {
+    if (!authGateOverlay) {
+      return;
+    }
+    authGateOverlay.hidden = true;
+    if (authCodeInput) {
+      authCodeInput.value = '';
+    }
+    if (authErrorMsg) {
+      authErrorMsg.textContent = '';
+      authErrorMsg.hidden = true;
+    }
+  }
+
+  /**
    * Fetches the video list and local network URLs from GET /api/videos.
    */
   async function fetchVideoListAndNetworkInfo() {
     try {
       const response = await fetch('/api/videos');
+      if (response.status === 401) {
+        showAuthGate();
+        return;
+      }
       if (!response.ok) {
         return;
       }
       const data = await response.json();
+      if (data.role) {
+        applyUserRoleUI(data.role);
+      }
       renderVideoDropdown(data.videos || []);
 
       if (Array.isArray(data.networkUrls) && data.networkUrls.length > 0) {
@@ -1294,6 +1454,9 @@
   });
 
   async function handleProvidedVideoFile(file) {
+    if (currentUserRole !== 'host') {
+      return;
+    }
     if (!file || !file.name.toLowerCase().endsWith('.mp4')) {
       uploadStatusEl.textContent = 'Only .mp4 video files are supported.';
       return;
@@ -1341,6 +1504,9 @@
   }
 
   playerContainer.addEventListener('dragover', (event) => {
+    if (currentUserRole !== 'host') {
+      return;
+    }
     event.preventDefault();
     playerContainer.classList.add('drag-over');
   });
@@ -1352,6 +1518,9 @@
   });
 
   playerContainer.addEventListener('drop', (event) => {
+    if (currentUserRole !== 'host') {
+      return;
+    }
     event.preventDefault();
     playerContainer.classList.remove('drag-over');
 
@@ -1362,11 +1531,140 @@
   });
 
   // ==========================================================================
+  // Room Access Authentication Gate & Host Room Code Management
+  // ==========================================================================
+
+  if (authGateForm && authCodeInput) {
+    authGateForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submittedCode = (authCodeInput.value || '').trim();
+      if (!submittedCode) {
+        return;
+      }
+
+      if (authSubmitBtn) {
+        authSubmitBtn.disabled = true;
+      }
+
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: submittedCode })
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          showAuthGate(data.error || 'Invalid room access code.');
+          return;
+        }
+
+        hideAuthGate();
+        applyUserRoleUI(data.role || 'guest');
+
+        // Reconnect Socket.IO now that the HttpOnly session cookie is set
+        if (typeof socket.disconnect === 'function' && typeof socket.connect === 'function') {
+          socket.disconnect();
+          socket.connect();
+        }
+        fetchVideoListAndNetworkInfo();
+      } catch {
+        showAuthGate('Unable to reach server. Please check your internet connection.');
+      } finally {
+        if (authSubmitBtn) {
+          authSubmitBtn.disabled = false;
+        }
+      }
+    });
+  }
+
+  if (toggleRoomCodeBtn) {
+    toggleRoomCodeBtn.addEventListener('click', async () => {
+      if (!hostRoomCodeValue) {
+        await fetchHostRoomCode();
+      }
+      isRoomCodeRevealed = !isRoomCodeRevealed;
+      updateHostRoomCodeBadge();
+    });
+  }
+
+  if (copyRoomCodeBtn) {
+    copyRoomCodeBtn.addEventListener('click', async () => {
+      if (!hostRoomCodeValue) {
+        await fetchHostRoomCode();
+      }
+      if (!hostRoomCodeValue) {
+        return;
+      }
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+          await navigator.clipboard.writeText(hostRoomCodeValue);
+          copyRoomCodeBtn.textContent = 'Copied';
+          setTimeout(() => {
+            copyRoomCodeBtn.textContent = 'Copy';
+          }, 1800);
+          return;
+        } catch {}
+      }
+      // Fallback: reveal code so the host can copy it manually
+      isRoomCodeRevealed = true;
+      updateHostRoomCodeBadge();
+    });
+  }
+
+  if (changeRoomCodeBtn && roomCodeDialog) {
+    changeRoomCodeBtn.addEventListener('click', () => {
+      if (customRoomCodeInput) {
+        customRoomCodeInput.value = '';
+      }
+      if (typeof roomCodeDialog.showModal === 'function') {
+        roomCodeDialog.showModal();
+      }
+    });
+
+    roomCodeDialog.addEventListener('close', async () => {
+      if (roomCodeDialog.returnValue !== 'confirm') {
+        return;
+      }
+      const requestedCode = customRoomCodeInput ? customRoomCodeInput.value.trim() : '';
+      try {
+        const response = await fetch('/api/host/room-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomCode: requestedCode })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          uploadStatusEl.textContent = data.error || 'Failed to update room code.';
+          return;
+        }
+        if (data.roomCode) {
+          hostRoomCodeValue = data.roomCode;
+          isRoomCodeRevealed = true;
+          updateHostRoomCodeBadge();
+          uploadStatusEl.textContent = 'Room code updated';
+          setTimeout(() => {
+            uploadStatusEl.textContent = '';
+          }, 3000);
+        }
+      } catch {
+        uploadStatusEl.textContent = 'Error updating room code.';
+      }
+    });
+  }
+
+  // ==========================================================================
   // Keyboard Shortcuts
   // ==========================================================================
 
   function isTypingInInput(target) {
+    if (authGateOverlay && !authGateOverlay.hidden) {
+      return true;
+    }
     if (deleteConfirmDialog && deleteConfirmDialog.open) {
+      return true;
+    }
+    if (roomCodeDialog && roomCodeDialog.open) {
       return true;
     }
     if (!target) {
@@ -1461,6 +1759,7 @@
   // ==========================================================================
 
   socket.on('connect', () => {
+    hideAuthGate();
     connectionIndicator.classList.remove('status-disconnected');
     connectionIndicator.classList.add('status-connected');
     connectionStatusText.textContent = 'Connected';
@@ -1469,10 +1768,59 @@
     fetchVideoListAndNetworkInfo();
   });
 
+  socket.on('connect_error', (err) => {
+    connectionIndicator.classList.remove('status-connected');
+    connectionIndicator.classList.add('status-disconnected');
+
+    if (err && err.message === 'AUTH_REQUIRED') {
+      showAuthGate();
+    } else {
+      connectionStatusText.textContent = 'Server Unreachable - Retrying...';
+    }
+  });
+
   socket.on('disconnect', () => {
     connectionIndicator.classList.remove('status-connected');
     connectionIndicator.classList.add('status-disconnected');
     connectionStatusText.textContent = 'Disconnected - Reconnecting...';
+  });
+
+  socket.on('auth-status', (payload = {}) => {
+    if (payload.authenticated) {
+      hideAuthGate();
+      applyUserRoleUI(payload.role || 'guest');
+    } else {
+      showAuthGate();
+    }
+  });
+
+  socket.on('auth-revoked', (payload = {}) => {
+    showAuthGate(payload.message || 'The host updated the room access code. Please sign in again.');
+  });
+
+  socket.on('sync-error', (payload = {}) => {
+    if (payload.error && uploadStatusEl) {
+      uploadStatusEl.textContent = payload.error;
+      setTimeout(() => {
+        uploadStatusEl.textContent = '';
+      }, 3500);
+    }
+  });
+
+  window.addEventListener('offline', () => {
+    connectionIndicator.classList.remove('status-connected');
+    connectionIndicator.classList.add('status-disconnected');
+    connectionStatusText.textContent = 'Offline - Waiting for network...';
+  });
+
+  window.addEventListener('online', () => {
+    if (socket && socket.connected) {
+      connectionIndicator.classList.remove('status-disconnected');
+      connectionIndicator.classList.add('status-connected');
+      connectionStatusText.textContent = 'Connected';
+    } else {
+      connectionStatusText.textContent = 'Reconnecting...';
+    }
   });
 
   socket.on('user-count', (payload = {}) => {

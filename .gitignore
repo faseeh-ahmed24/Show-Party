@@ -1,5 +1,7 @@
 node_modules/
 videos/*.mp4
 !videos/sample.mp4
+.env
+cloudflared.exe
 .DS_Store
 Thumbs.db

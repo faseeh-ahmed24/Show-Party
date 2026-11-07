@@ -22,6 +22,7 @@
     </div>
 
     <div class="header-right">
+      <span id="role-badge" class="role-badge" hidden>Host</span>
       <div class="connection-info" aria-live="polite">
         <span id="connection-indicator" class="status-dot status-disconnected" aria-hidden="true"></span>
         <span id="connection-status-text">Connecting...</span>
@@ -30,6 +31,32 @@
       </div>
     </div>
   </header>
+
+  <!-- Room Access Gate Overlay (shown to unauthenticated visitors) -->
+  <div id="auth-gate-overlay" class="auth-gate-overlay" role="dialog" aria-modal="true" aria-labelledby="auth-gate-title" hidden>
+    <div class="auth-gate-card">
+      <h2 id="auth-gate-title" class="auth-gate-title">Room Access Required</h2>
+      <p class="auth-gate-subtitle">
+        Enter the private room access code shared by the host to join ShowParty.
+      </p>
+      <form id="auth-gate-form" class="auth-gate-form">
+        <input
+          type="password"
+          id="auth-code-input"
+          class="auth-code-input"
+          placeholder="Enter room access code"
+          autocomplete="off"
+          maxlength="32"
+          aria-label="Room access code"
+          required
+        >
+        <button type="submit" id="auth-submit-btn" class="secondary-btn auth-submit-btn">
+          Join Watch Party
+        </button>
+      </form>
+      <p id="auth-error-msg" class="auth-error-msg" role="alert" hidden></p>
+    </div>
+  </div>
 
   <main class="main-content">
     <!-- Top toolbar: Video selector with per-video remove buttons and MP4 file upload -->
@@ -73,6 +100,21 @@
       </div>
 
       <div class="upload-group">
+        <!-- Host-only Room Access Code controls -->
+        <div id="host-room-controls" class="host-room-controls" hidden>
+          <span class="toolbar-label">Room Code:</span>
+          <code id="host-room-code-display" class="room-code-badge" aria-live="polite">••••••••</code>
+          <button type="button" id="toggle-room-code-btn" class="secondary-btn compact-btn" title="Show or hide room code">
+            Show
+          </button>
+          <button type="button" id="copy-room-code-btn" class="secondary-btn compact-btn" title="Copy room code">
+            Copy
+          </button>
+          <button type="button" id="change-room-code-btn" class="secondary-btn compact-btn" title="Configure or regenerate room code">
+            Set Code
+          </button>
+        </div>
+
         <input type="file" id="file-input" accept="video/mp4,.mp4" hidden>
         <button type="button" id="add-video-btn" class="secondary-btn">
           Add MP4 File
@@ -316,6 +358,33 @@
         </button>
         <button type="submit" value="confirm" id="delete-confirm-btn" class="danger-btn">
           Remove Video
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Host Modal Dialog for Configuring or Regenerating Room Access Code -->
+  <dialog id="room-code-dialog" class="confirm-dialog" aria-labelledby="room-code-dialog-title">
+    <form id="room-code-dialog-form" method="dialog" class="confirm-dialog-form">
+      <h2 id="room-code-dialog-title" class="confirm-dialog-title">Configure Room Access Code</h2>
+      <p class="confirm-dialog-message">
+        Enter a custom room code (4–32 characters), or leave blank to generate a new random code. Updating the code will require guests to sign in with the new code.
+      </p>
+      <input
+        type="text"
+        id="custom-room-code-input"
+        class="chat-input"
+        placeholder="Leave blank for random 8-char code"
+        maxlength="32"
+        autocomplete="off"
+        aria-label="Custom room code"
+      >
+      <div class="confirm-dialog-actions">
+        <button type="submit" value="cancel" id="room-code-cancel-btn" class="secondary-btn">
+          Cancel
+        </button>
+        <button type="submit" value="confirm" id="room-code-save-btn" class="secondary-btn">
+          Update Code
         </button>
       </div>
     </form>

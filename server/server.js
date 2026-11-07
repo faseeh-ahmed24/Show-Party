@@ -16,6 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const { Server } = require('socket.io');
 const playbackManager = require('./playbackManager');
+const authManager = require('./authManager');
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = '0.0.0.0';
@@ -33,10 +34,17 @@ if (!fs.existsSync(VIDEOS_DIR)) {
 }
 
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+app.disable('x-powered-by');
+app.use(express.json({ limit: '16kb' }));
 
-// Serve static frontend assets (index.html, style.css, script.js)
+const server = http.createServer(app);
+const io = new Server(server, {
+  pingInterval: 20000,
+  pingTimeout: 20000,
+  maxHttpBufferSize: 1e6
+});
+
+// Serve static frontend assets (index.html, style.css, script.js, aurora.js, cometDial.js)
 app.use(express.static(PUBLIC_DIR));
 
 /**
@@ -294,29 +302,140 @@ function createChatMessage({ type, sender, senderId, text, persist = true }) {
 }
 
 // ============================================================================
-// HTTP API Endpoints
+// Authentication & Room Access Control Endpoints
+// ============================================================================
+
+/**
+ * GET /api/auth/session
+ * Returns whether the current browser session is authenticated and its role ('host' or 'guest').
+ * Direct connections from localhost automatically receive a 'host' session cookie.
+ */
+app.get('/api/auth/session', (req, res) => {
+  const auth = authManager.resolveRequestAuth(req, res);
+  return res.json({
+    authenticated: auth.authenticated,
+    role: auth.role,
+    maxUploadMB: authManager.MAX_UPLOAD_MB
+  });
+});
+
+/**
+ * POST /api/auth/login
+ * Validates a visitor's room access code with brute-force rate limiting.
+ * Sets an HttpOnly session cookie upon success.
+ */
+app.post('/api/auth/login', (req, res) => {
+  const clientIp = authManager.getClientIp(
+    req.headers,
+    req.socket ? req.socket.remoteAddress : ''
+  );
+
+  const rateStatus = authManager.checkLoginRateLimit(clientIp);
+  if (!rateStatus.allowed) {
+    res.setHeader('Retry-After', String(rateStatus.retryAfterSeconds));
+    return res.status(429).json({
+      error: `Too many failed login attempts. Please wait ${rateStatus.retryAfterSeconds} seconds before trying again.`,
+      retryAfterSeconds: rateStatus.retryAfterSeconds
+    });
+  }
+
+  const submittedCode = req.body && typeof req.body.code === 'string' ? req.body.code : '';
+  if (!authManager.verifyRoomCode(submittedCode)) {
+    authManager.recordFailedLoginAttempt(clientIp);
+    return res.status(401).json({
+      error: 'Incorrect room access code. Please check the code shared by the host.'
+    });
+  }
+
+  authManager.clearFailedLoginAttempts(clientIp);
+  const existingAuth = authManager.resolveRequestAuth(req, res);
+  const assignedRole = existingAuth.role === 'host' ? 'host' : 'guest';
+  const sessionToken = authManager.createSession(assignedRole);
+  res.setHeader('Set-Cookie', authManager.buildSessionCookieHeader(sessionToken, req));
+
+  return res.status(200).json({
+    authenticated: true,
+    role: assignedRole,
+    maxUploadMB: authManager.MAX_UPLOAD_MB
+  });
+});
+
+/**
+ * POST /api/auth/logout
+ * Clears the visitor's current session cookie.
+ */
+app.post('/api/auth/logout', (req, res) => {
+  const auth = authManager.resolveRequestAuth(req, null);
+  if (auth.token) {
+    authManager.removeSession(auth.token);
+  }
+  res.setHeader('Set-Cookie', authManager.buildClearSessionCookieHeader());
+  return res.status(200).json({ success: true });
+});
+
+/**
+ * GET /api/host/room-code
+ * Host-only endpoint returning the current private room access code so the host
+ * can copy and share it with a friend.
+ */
+app.get('/api/host/room-code', authManager.requireHost, (req, res) => {
+  return res.json({
+    roomCode: authManager.getRoomCode()
+  });
+});
+
+/**
+ * POST /api/host/room-code
+ * Host-only endpoint allowing the host to generate a new random room code or set
+ * a custom room code, revoking previous guest sessions.
+ */
+app.post('/api/host/room-code', authManager.requireHost, (req, res) => {
+  const customCode = req.body && typeof req.body.roomCode === 'string' ? req.body.roomCode : '';
+  const result = authManager.updateRoomCode(customCode, { revokeGuests: true });
+  if (result.error) {
+    return res.status(400).json({ error: result.error });
+  }
+
+  // Disconnect any currently connected guest sockets so they must re-authenticate with the new code
+  for (const [, clientSocket] of io.of('/').sockets) {
+    if (clientSocket.data && clientSocket.data.role === 'guest') {
+      clientSocket.emit('auth-revoked', {
+        message: 'The host updated the room access code. Please enter the new code to rejoin.'
+      });
+      clientSocket.disconnect(true);
+    }
+  }
+
+  return res.status(200).json({
+    roomCode: result.roomCode
+  });
+});
+
+// ============================================================================
+// Protected Video & Library HTTP API Endpoints
 // ============================================================================
 
 /**
  * GET /api/videos
  * Returns the list of available MP4 files in /videos, the active playback state,
- * and the host's local network URLs.
+ * the caller's role ('host' or 'guest'), and the host's local network URLs.
  */
-app.get('/api/videos', (req, res) => {
+app.get('/api/videos', authManager.requireAuth, (req, res) => {
   const videos = reconcileActiveVideoWithDisk();
   res.json({
     videos,
     state: playbackManager.getCurrentState(),
+    role: req.userAuth.role,
     networkUrls: getLocalIPv4Addresses()
   });
 });
 
 /**
  * DELETE /api/videos/:filename
- * Safely deletes an MP4 file from the /videos directory on the server.
+ * Host-only: Safely deletes an MP4 file from the /videos directory on the server.
  * If the deleted video was currently active, clears playback for all connected users.
  */
-app.delete('/api/videos/:filename', (req, res) => {
+app.delete('/api/videos/:filename', authManager.requireHost, (req, res) => {
   const resolved = resolveSafeVideoPath(req.params.filename);
   if (!resolved) {
     return res.status(400).json({
@@ -392,9 +511,9 @@ app.delete('/api/videos/:filename', (req, res) => {
 
 /**
  * GET /videos/:filename
- * Streams an MP4 file from /videos using HTTP Range Requests (206 Partial Content).
+ * Protected: Streams an MP4 file from /videos using HTTP Range Requests (206 Partial Content).
  */
-app.get('/videos/:filename', (req, res) => {
+app.get('/videos/:filename', authManager.requireAuth, (req, res) => {
   const resolved = resolveSafeVideoPath(req.params.filename);
   if (!resolved) {
     return res.status(400).send('Invalid video filename. Only .mp4 files in /videos are allowed.');
@@ -452,7 +571,8 @@ app.get('/videos/:filename', (req, res) => {
       'Accept-Ranges': 'bytes',
       'Content-Length': contentLength,
       'Content-Type': 'video/mp4',
-      'Cache-Control': 'no-cache'
+      'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff'
     });
 
     const stream = fs.createReadStream(resolved.fullPath, { start, end });
@@ -470,7 +590,8 @@ app.get('/videos/:filename', (req, res) => {
       'Accept-Ranges': 'bytes',
       'Content-Length': fileSize,
       'Content-Type': 'video/mp4',
-      'Cache-Control': 'no-cache'
+      'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff'
     });
 
     const stream = fs.createReadStream(resolved.fullPath);
@@ -488,10 +609,10 @@ app.get('/videos/:filename', (req, res) => {
 
 /**
  * POST /api/upload?filename=example.mp4
- * Streams an uploaded/dropped MP4 file directly to disk inside /videos without
- * buffering the whole file in Node.js memory, then selects it for all connected users.
+ * Host-only: Streams an uploaded/dropped MP4 file directly to disk inside /videos
+ * without buffering the whole file in Node.js memory, enforcing MAX_UPLOAD_BYTES.
  */
-app.post('/api/upload', (req, res) => {
+app.post('/api/upload', authManager.requireHost, (req, res) => {
   const rawFilename = req.query.filename;
   const resolved = resolveSafeVideoPath(rawFilename);
 
@@ -501,9 +622,37 @@ app.post('/api/upload', (req, res) => {
     });
   }
 
+  const contentLengthHeader = Number(req.headers['content-length']);
+  if (
+    Number.isFinite(contentLengthHeader) &&
+    contentLengthHeader > authManager.MAX_UPLOAD_BYTES
+  ) {
+    return res.status(413).json({
+      error: `Video file exceeds the maximum upload limit of ${authManager.MAX_UPLOAD_MB} MB.`
+    });
+  }
+
   const tempPath = `${resolved.fullPath}.uploading`;
   const writeStream = fs.createWriteStream(tempPath);
   let aborted = false;
+  let bytesReceived = 0;
+
+  req.on('data', (chunk) => {
+    bytesReceived += chunk.length;
+    if (bytesReceived > authManager.MAX_UPLOAD_BYTES && !aborted) {
+      aborted = true;
+      writeStream.destroy();
+      if (fs.existsSync(tempPath)) {
+        fs.unlink(tempPath, () => {});
+      }
+      if (!res.headersSent) {
+        res.status(413).json({
+          error: `Video file exceeds the maximum upload limit of ${authManager.MAX_UPLOAD_MB} MB.`
+        });
+      }
+      req.destroy();
+    }
+  });
 
   req.on('aborted', () => {
     aborted = true;
@@ -559,29 +708,44 @@ app.post('/api/upload', (req, res) => {
 // Socket.IO Real-Time Synchronization & Chat
 // ============================================================================
 
+/**
+ * Socket.IO authentication middleware: rejects unauthorized visitors before
+ * they can join the room or receive/emit any playback or chat events.
+ */
+io.use((socket, next) => {
+  const auth = authManager.resolveSocketAuth(socket);
+  if (!auth.authenticated) {
+    return next(new Error('AUTH_REQUIRED'));
+  }
+  socket.data.role = auth.role;
+  return next();
+});
+
 io.on('connection', (socket) => {
   const userRecord = assignDefaultUsername();
+  userRecord.role = socket.data.role || 'guest';
   connectedUsers.set(socket.id, userRecord);
   console.log(
-    `[Socket.IO] Client connected: ${socket.id} as "${userRecord.username}" (Total: ${connectedUsers.size})`
+    `[Socket.IO] Client connected: ${socket.id} as "${userRecord.username}" (${userRecord.role}) (Total: ${connectedUsers.size})`
   );
 
   const videos = reconcileActiveVideoWithDisk();
 
-  // 1. Send video list, authoritative playback state, chat identity, and chat history
+  // 1. Send role/auth status, video list, authoritative playback state, chat identity, and chat history
+  socket.emit('auth-status', { authenticated: true, role: userRecord.role });
   socket.emit('video-list', { videos });
   socket.emit('sync-state', {
     ...playbackManager.getCurrentState(),
     reason: 'initial-join',
     actorId: 'server'
   });
-  socket.emit('chat-identity', { username: userRecord.username });
+  socket.emit('chat-identity', { username: userRecord.username, role: userRecord.role });
   socket.emit('chat-history', { messages: chatHistory });
 
   // 2. Broadcast updated connected viewer count to everyone
   io.emit('user-count', { count: connectedUsers.size });
 
-  // --- Playback Events ---
+  // --- Playback Events (Available to both Host and Guest) ---
 
   socket.on('play', (payload = {}) => {
     const updatedState = playbackManager.play(payload.currentTime);
@@ -610,7 +774,16 @@ io.on('connection', (socket) => {
     });
   });
 
+  // --- Video Library Selection (Host-Only) ---
+
   socket.on('select-video', (payload = {}) => {
+    if (socket.data.role !== 'host') {
+      socket.emit('sync-error', {
+        message: 'Only the host can manage and switch videos in the library.'
+      });
+      return;
+    }
+
     const resolved = resolveSafeVideoPath(payload.videoFile);
     if (!resolved || !fs.existsSync(resolved.fullPath)) {
       socket.emit('sync-error', { message: 'Selected video does not exist in /videos.' });

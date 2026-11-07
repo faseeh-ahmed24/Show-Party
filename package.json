@@ -4,7 +4,9 @@
   "description": "Private synchronized video sharing website for watching local MP4 files together.",
   "main": "server/server.js",
   "scripts": {
-    "start": "node server/server.js"
+    "start": "node server/server.js",
+    "start:local": "node server/server.js",
+    "start:public": "node server/tunnelLauncher.js"
   },
   "dependencies": {
     "express": "^4.21.2",
