@@ -1290,6 +1290,33 @@
     }
   }
 
+  const EMOJI_SHORTCUTS = {
+    sob: '😭',
+    frown: '☹️',
+    hearts: '🥰'
+  };
+
+  function replaceEmojiShortcutsInText(text) {
+    return text.replace(/:([a-z0-9_+-]+):/gi, (fullMatch, name) => {
+      const emoji = EMOJI_SHORTCUTS[name.toLowerCase()];
+      return emoji || fullMatch;
+    });
+  }
+
+  function attachLiveEmojiReplacement(inputEl) {
+    if (!inputEl) return;
+    inputEl.addEventListener('input', () => {
+      const original = inputEl.value;
+      const converted = replaceEmojiShortcutsInText(original);
+      if (converted !== original) {
+        inputEl.value = converted;
+      }
+    });
+  }
+
+  attachLiveEmojiReplacement(chatInput);
+  attachLiveEmojiReplacement(fullscreenChatInput);
+
   if (chatForm && chatInput) {
     chatForm.addEventListener('submit', (event) => {
       event.preventDefault();
